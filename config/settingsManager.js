@@ -1,0 +1,305 @@
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { logger } = require('./logger');
+
+let runtimeSessionSecret = null;
+function getSecureSessionSecretFallback() {
+  if (!runtimeSessionSecret) {
+    runtimeSessionSecret = crypto.randomBytes(32).toString('hex');
+  }
+  return runtimeSessionSecret;
+}
+
+// Cache untuk settings dengan timestamp
+let settingsCache = null;
+let settingsCacheTime = 0;
+const CACHE_DURATION = 2000; // 2 detik
+
+// File system watcher untuk auto-reload settings
+const settingsPath = path.join(__dirname, '../settings.json');
+let watcher = null;
+
+// Helper untuk baca settings.json secara dinamis
+function getSettings() {
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) || {};
+    
+    // Secure fallback for session_secret
+    const defaultSecret = 'rahasia-portal-pelanggan-default-ganti-ini';
+    if (!settings.session_secret || settings.session_secret === defaultSecret) {
+      settings.session_secret = getSecureSessionSecretFallback();
+    }
+
+    const fallbackTz = 'Asia/Jakarta';
+    const tz = typeof settings.timezone === 'string' ? settings.timezone.trim() : '';
+
+    if (!tz) {
+      settings.timezone = fallbackTz;
+      return settings;
+    }
+
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date());
+      settings.timezone = tz;
+    } catch (e) {
+      settings.timezone = fallbackTz;
+    }
+
+    return settings;
+  } catch (error) {
+    logger.error(`[settings] Error reading settings.json: ${error.message}`);
+    return {};
+  }
+}
+
+// Helper untuk baca settings.json dengan cache
+function getSettingsWithCache() {
+  const now = Date.now();
+  if (!settingsCache || (now - settingsCacheTime) > CACHE_DURATION) {
+    settingsCache = getSettings();
+    settingsCacheTime = now;
+  }
+  return settingsCache;
+}
+
+// Helper untuk mendapatkan nilai setting dengan fallback
+function getSetting(key, defaultValue = null) {
+  const settings = getSettingsWithCache();
+  return settings[key] !== undefined ? settings[key] : defaultValue;
+}
+
+// Helper untuk mendapatkan multiple settings
+function getSettingsByKeys(keys) {
+  const settings = getSettingsWithCache();
+  const result = {};
+  keys.forEach(key => {
+    result[key] = settings[key];
+  });
+  return result;
+}
+
+// File system watcher untuk auto-reload settings
+function startSettingsWatcher() {
+  try {
+    // Hapus watcher lama jika ada
+    if (watcher) {
+      watcher.close();
+    }
+    
+    // Buat watcher baru
+    watcher = fs.watch(settingsPath, (eventType, filename) => {
+      if (eventType !== 'change') return;
+      // Di Windows `filename` sering null; hanya abaikan jika jelas bukan settings.json
+      if (filename != null && filename !== 'settings.json') return;
+
+      settingsCache = null;
+      settingsCacheTime = 0;
+
+      try {
+        const s = getSettingsWithCache();
+        const port = s.server_port ?? 4555;
+        const host = s.server_host || 'localhost';
+        const gurl = s.genieacs_url || '(tidak diatur)';
+        const company = s.company_header || '(default)';
+        logger.info(`[settings] settings.json dimuat ulang — port ${port}, host ${host}, company: ${company}, GenieACS: ${gurl}`);
+      } catch (error) {
+        logger.error(`[settings] Gagal memuat ulang settings.json: ${error.message}`);
+      }
+    });
+
+    logger.info('[settings] Memantau perubahan settings.json');
+  } catch (error) {
+    logger.error(`[settings] Error starting settings watcher: ${error.message}`);
+  }
+}
+
+// Mulai watcher saat modul dimuat
+startSettingsWatcher();
+
+// Menyimpan pengaturan ke settings.json
+function saveSettings(newSettings) {
+  try {
+    const currentSettings = getSettings();
+    const updatedSettings = { ...currentSettings, ...newSettings };
+    fs.writeFileSync(settingsPath, JSON.stringify(updatedSettings, null, 2), 'utf-8');
+    settingsCache = updatedSettings;
+    settingsCacheTime = Date.now();
+    return true;
+  } catch (error) {
+    logger.error(`[settings] Error saving settings.json: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Helper untuk mendapatkan waktu sekarang dalam format lokal
+ * sesuai timezone yang diatur di settings.json
+ */
+function getNowLocal() {
+  const tz = getSetting('timezone', 'Asia/Jakarta');
+  const now = new Date();
+  const options = {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  };
+  const formatter = new Intl.DateTimeFormat('en-US', options);
+  const parts = formatter.formatToParts(now);
+  const p = {};
+  parts.forEach(part => p[part.type] = part.value);
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+/**
+ * Helper untuk mendapatkan objek Date yang sudah disesuaikan dengan timezone di settings.
+ * Mengembalikan objek Date yang "angkanya" sudah sesuai dengan waktu lokal.
+ */
+function getCurrentDateInTimezone() {
+  const tz = getSetting('timezone', 'Asia/Jakarta');
+  const now = new Date();
+
+  try {
+    // Ambil setiap bagian tanggal/waktu secara terpisah
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    });
+
+    const parts = formatter.formatToParts(now);
+    const p = {};
+    parts.forEach(part => p[part.type] = part.value);
+
+    // Handle edge case: beberapa engine mengembalikan hour "24" saat midnight
+    let hour = parseInt(p.hour, 10);
+    let day = parseInt(p.day, 10);
+    let month = parseInt(p.month, 10);
+    let year = parseInt(p.year, 10);
+    const minute = parseInt(p.minute, 10);
+    const second = parseInt(p.second, 10);
+
+    if (hour === 24) {
+      // Normalisasi: jam 24 = jam 0 hari berikutnya
+      hour = 0;
+      const tmp = new Date(Date.UTC(year, month - 1, day + 1));
+      year = tmp.getUTCFullYear();
+      month = tmp.getUTCMonth() + 1;
+      day = tmp.getUTCDate();
+    }
+
+    // Buat Date object dari nilai lokal yang sudah dinormalisasi
+    const result = new Date(year, month - 1, day, hour, minute, second);
+    if (isNaN(result.getTime())) throw new Error('Constructed date is invalid');
+    return result;
+  } catch (e) {
+    // Fallback: kembalikan Date lokal biasa
+    return new Date();
+  }
+}
+
+/**
+ * Mendapatkan info waktu sekarang (year, month, day, dll) dalam timezone yang diatur.
+ */
+function getCurrentTimeInfo() {
+  const tz = getSetting('timezone', 'Asia/Jakarta');
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+    hour12: false
+  });
+  
+  const parts = formatter.formatToParts(now);
+  const p = {};
+  parts.forEach(part => p[part.type] = part.value);
+  
+  return {
+    year: parseInt(p.year),
+    month: parseInt(p.month),
+    day: parseInt(p.day),
+    hour: parseInt(p.hour),
+    minute: parseInt(p.minute),
+    second: parseInt(p.second)
+  };
+}
+
+/**
+ * Mendapatkan string ISO-like tapi dalam waktu lokal (bukan UTC).
+ * Berguna untuk timestamp log/backup.
+ */
+function getNowLocalISO() {
+  const info = getCurrentTimeInfo();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${info.year}-${pad(info.month)}-${pad(info.day)}T${pad(info.hour)}:${pad(info.minute)}:${pad(info.second)}`;
+}
+
+/**
+ * Memparse string tanggal (YYYY-MM-DD HH:mm:ss) menjadi objek Date
+ * dengan asumsi string tersebut adalah waktu lokal sesuai setting timezone.
+ */
+function parseDateInTimezone(dateStr) {
+  if (!dateStr) return null;
+  const tz = getSetting('timezone', 'Asia/Jakarta');
+  
+  const date = new Date(dateStr.replace(' ', 'T'));
+  if (isNaN(date.getTime())) return null;
+
+  const localDateStr = date.toLocaleString('en-US', { timeZone: tz, hour12: false });
+  const localDate = new Date(localDateStr);
+  const diff = localDate.getTime() - date.getTime();
+  
+  return new Date(date.getTime() - diff);
+}
+
+function formatDateLocal(date) {
+  if (!date) return '-';
+  const tz = getSetting('timezone', 'Asia/Jakarta');
+  let d;
+  if (typeof date === 'string') {
+    d = parseDateInTimezone(date);
+  } else {
+    d = typeof date === 'number' ? new Date(date) : date;
+  }
+  if (!d || isNaN(d.getTime())) return '-';
+  return d.toLocaleString('id-ID', { timeZone: tz });
+}
+
+/**
+ * Helper untuk memformat objek Date menjadi string waktu lokal (hanya Jam:Menit)
+ */
+function formatTimeLocal(date) {
+  if (!date) return '-';
+  const tz = getSetting('timezone', 'Asia/Jakarta');
+  let d;
+  if (typeof date === 'string') {
+    d = parseDateInTimezone(date);
+  } else {
+    d = typeof date === 'number' ? new Date(date) : date;
+  }
+  if (!d || isNaN(d.getTime())) return '-';
+  return d.toLocaleTimeString('id-ID', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
+}
+
+module.exports = {
+  getSettings,
+  getSettingsWithCache,
+  getSetting,
+  getSettingsByKeys,
+  saveSettings,
+  getNowLocal,
+  formatDateLocal,
+  formatTimeLocal,
+  getCurrentDateInTimezone,
+  getCurrentTimeInfo,
+  getNowLocalISO,
+  parseDateInTimezone,
+  startSettingsWatcher
+};

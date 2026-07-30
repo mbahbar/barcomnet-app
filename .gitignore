@@ -1,0 +1,10 @@
+settings.json
+settings.json.bak
+database.sqlite
+database/
+public/uploads/
+auth_info_baileys/
+backups/
+logs/
+node_modules/
+.env
