@@ -1,3 +1,4 @@
+const bcrypt = require('bcrypt');
 const db = require('../config/database');
 
 /**
@@ -92,6 +93,25 @@ function authenticateCollector(username, password) {
   return db.prepare('SELECT * FROM collectors WHERE username = ? AND password = ? AND is_active = 1').get(username, password);
 }
 
+
+// Async bcrypt-aware cashier authentication
+async function authenticateCashierAsync(username, password) {
+  const cashier = db.prepare('SELECT * FROM cashiers WHERE username = ? AND is_active = 1').get(username);
+  if (!cashier) return null;
+  const isHash = String(cashier.password).startsWith('$2b$') || String(cashier.password).startsWith('$2a$');
+  const ok = isHash ? await bcrypt.compare(password, cashier.password) : (password === cashier.password);
+  return ok ? cashier : null;
+}
+
+// Async bcrypt-aware collector authentication
+async function authenticateCollectorAsync(username, password) {
+  const collector = db.prepare('SELECT * FROM collectors WHERE username = ? AND is_active = 1').get(username);
+  if (!collector) return null;
+  const isHash = String(collector.password).startsWith('$2b$') || String(collector.password).startsWith('$2a$');
+  const ok = isHash ? await bcrypt.compare(password, collector.password) : (password === collector.password);
+  return ok ? collector : null;
+}
+
 module.exports = {
   getAllTechnicians,
   createTechnician,
@@ -102,6 +122,8 @@ module.exports = {
   updateCashier,
   deleteCashier,
   authenticateCashier,
+  authenticateCashierAsync,
+  authenticateCollectorAsync,
   getAllCollectors,
   createCollector,
   updateCollector,

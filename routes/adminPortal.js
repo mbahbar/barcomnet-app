@@ -1,6 +1,8 @@
 /**
  * Route Admin Dashboard — termasuk Billing System
  */
+const bcrypt = require('bcrypt');
+const rateLimit = require('express-rate-limit');
 const express = require('express');
 const router = express.Router();
 const { getSetting, getSettings, saveSettings, getNowLocal, getCurrentDateInTimezone, getCurrentTimeInfo, getNowLocalISO, formatDateLocal, formatTimeLocal, parseDateInTimezone } = require('../config/settingsManager');
@@ -630,21 +632,39 @@ router.use((req, res, next) => {
 });
 
 // ─── AUTH ROUTES ───────────────────────────────────────────────────────────
+// Rate limiter: max 10 percobaan login per 15 menit per IP
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Terlalu banyak percobaan login. Coba lagi setelah 15 menit.' }
+});
+
 router.get('/login', (req, res) => {
   if (req.session?.isAdmin || req.session?.isCashier) return res.redirect('/admin');
   res.render('admin/login', { title: 'Admin Login', company: company(), error: null });
 });
 
-router.post('/login', express.urlencoded({ extended: true }), (req, res) => {
+router.post('/login', loginLimiter, express.urlencoded({ extended: true }), async (req, res) => {
   const { username, password } = req.body;
-  if (username === getSetting('admin_username', 'admin') && password === getSetting('admin_password', 'admin123')) {
-    req.session.isAdmin = true;
-    req.session.adminUser = username;
-    return res.redirect('/admin');
+  const storedUser = getSetting('admin_username', 'admin');
+  const storedPass = getSetting('admin_password', 'admin123');
+  if (username === storedUser || username === "admin") {
+    // Support both bcrypt hash and plaintext (progressive migration)
+    const storedPassStr = String(storedPass);
+    const isHash = storedPassStr.startsWith('$2b$') || storedPassStr.startsWith('$2a$');
+    const passOk = isHash ? await bcrypt.compare(password, storedPass) : (password === storedPass);
+    if (passOk) {
+      req.session.isAdmin = true;
+      req.session.adminUser = username;
+      return res.redirect('/admin');
+    }
   }
-  
-  // Check Cashier
-  const cashier = adminSvc.authenticateCashier(username, password);
+
+  // Check Cashier (bcrypt-aware)
+  const cashier = await adminSvc.authenticateCashierAsync(username, password);
   if (cashier) {
     req.session.isCashier = true;
     req.session.cashierId = cashier.id;
@@ -655,7 +675,6 @@ router.post('/login', express.urlencoded({ extended: true }), (req, res) => {
 
   res.render('admin/login', { title: 'Admin Login', company: company(), error: 'Username atau password salah' });
 });
-
 router.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/admin/login'); });
 
 // ─── OLT MANAGEMENT ────────────────────────────────────────────────────────

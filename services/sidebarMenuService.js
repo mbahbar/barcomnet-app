@@ -3,7 +3,7 @@ const { getSetting, getSettings, saveSettings } = require('../config/settingsMan
 const { getAppSetting, saveAppSetting } = require('../config/database');
 
 const FEATURE_PASSWORD_HASH = '45d841d9f79ebadb8db21b0068b6b6d10a49ff66865e9fbf88267cceccd3c784';
-const FEATURE_CONTACT_PHONE = '081947215703';
+const FEATURE_CONTACT_PHONE = '085339275803';
 
 function getFeaturePasswordHash() {
   return getSetting('feature_password_hash', FEATURE_PASSWORD_HASH);

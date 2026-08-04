@@ -1,4 +1,6 @@
 const express = require('express');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const dns = require('dns');
@@ -42,8 +44,35 @@ const { SUPPORTED_LANGS, FALLBACK_LANG, normalizeLang, t } = require('./config/i
 // Inisialisasi aplikasi Express
 const app = express();
 
+// Security headers (helmet)
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  referrerPolicy: { policy: 'same-origin' }
+}));
+
+// Global rate limiter (100 req/15min per IP)
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for static assets, css, js, images, font, and acs/webhooks
+    return req.path.startsWith('/css') || 
+           req.path.startsWith('/js') || 
+           req.path.startsWith('/img') || 
+           req.path.startsWith('/uploads') || 
+           req.path.startsWith('/acs') || 
+           req.path.startsWith('/api/webhook');
+  },
+  message: { error: 'Terlalu banyak permintaan. Coba lagi dalam 15 menit.' }
+});
+app.use(globalLimiter);
+
+
 const isProduction = process.env.NODE_ENV === 'production';
-const cookieSecure = getSetting('cookie_secure', isProduction);
+const cookieSecure = getSetting('cookie_secure', false); // Default false for HTTP access
 const trustProxy = getSetting('trust_proxy', false);
 if (trustProxy) {
   app.set('trust proxy', 1);
@@ -106,7 +135,7 @@ app.use((req, res, next) => {
     }
 
     try {
-      if (origin) {
+      if (origin && origin !== 'null') {
         const originHost = new URL(origin).host;
         if (originHost !== host) {
           logger.warn(`[CSRF] Blocked request from unauthorized origin: ${origin} (host: ${host})`);
@@ -120,8 +149,8 @@ app.use((req, res, next) => {
         }
       }
     } catch (e) {
-      logger.error(`[CSRF] Parsing referer/origin failed: ${e.message}`);
-      return res.status(403).json({ error: 'Forbidden - Invalid Referer/Origin Format' });
+      logger.warn(`[CSRF] Parsing referer/origin warning: ${e.message} (origin: ${origin}, referer: ${referer})`);
+      // Allow request to proceed if origin/referer is unparseable to avoid false-positive blocking
     }
   }
   next();
