@@ -1,6 +1,6 @@
 {
   "name": "barcomnet-app",
-  "version": "1.0.1-B1",
+  "version": "1.0.2-SECURITY",
   "description": "Portal pelanggan GenieACS",
   "main": "app-customer.js",
   "scripts": {
