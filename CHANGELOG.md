@@ -25,11 +25,6 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-### 📞 Contact & System Updates
-- **Kontak Bantuan & Aktivasi**: Memperbarui nomor telepon dukungan sistem & aktivasi menu ke **`085339275803`**.
-
----
-
 ## 🚀 [v1.0.1-B1] - Initial Release
 - Rilis awal aplikasi billing RTRW Net berbasis Node.js, Express.js, & SQLite.
 - Integrasi MikroTik API, GenieACS (TR-069), Payment Gateway (Tripay, Midtrans), & Bot WhatsApp.
