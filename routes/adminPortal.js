@@ -360,8 +360,11 @@ function restrictToAdmin(req, res, next) {
 function company() { return getSetting('company_header', 'ISP Admin'); }
 
 function flashMsg(req) {
-  const m = req.session._msg;
-  delete req.session._msg;
+  const m = req.session ? req.session._msg : null;
+  if (req.session && req.session._msg !== undefined) {
+    req.session._msg = null;
+    delete req.session._msg;
+  }
   return m || null;
 }
 
