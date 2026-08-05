@@ -2384,7 +2384,7 @@ router.post('/api/vouchers/packages', requireAdminSession, express.json(), (req,
 
     const stmt = db.prepare(`
       INSERT INTO voucher_packages (router_id, profile_name, price, validity, prefix, code_length, charset, is_active, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, (NOW_LOCAL()))
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
       ON CONFLICT(router_id, profile_name) DO UPDATE SET
         price=excluded.price,
         validity=excluded.validity,
@@ -2392,7 +2392,7 @@ router.post('/api/vouchers/packages', requireAdminSession, express.json(), (req,
         code_length=excluded.code_length,
         charset=excluded.charset,
         is_active=excluded.is_active,
-        updated_at=(NOW_LOCAL())
+        updated_at=datetime('now', 'localtime')
     `);
     
     stmt.run(rId, profile_name, prc, String(validity).trim(), String(prefix || '').trim(), len, charset || 'mixed', act);
@@ -5714,7 +5714,7 @@ router.post('/promo-slides/:id/update', requireAdminSession, requireSidebarMenuA
       UPDATE promo_slides SET 
         title = ?, description = ?, image_path = ?, url = ?, 
         open_in_new_tab = ?, sort_order = ?, start_date = ?, end_date = ?, is_active = ?,
-        updated_at = NOW_LOCAL()
+        updated_at = datetime('now', 'localtime')
       WHERE id = ?
     `).run(
       String(title || '').trim(),

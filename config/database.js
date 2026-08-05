@@ -17,29 +17,11 @@ try {
   db.pragma('foreign_keys = ON');
 
   // Menambahkan fungsi waktu lokal untuk SQLite sesuai setting timezone
-  db.function('NOW_LOCAL', () => {
-    const { getSetting } = require('./settingsManager');
-    const tz = getSetting('timezone', 'Asia/Jakarta');
-    const now = new Date();
-    
-    // Format: YYYY-MM-DD HH:mm:ss
-    const options = {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    };
-    
-    const formatter = new Intl.DateTimeFormat('en-US', options);
-    const parts = formatter.formatToParts(now);
-    const p = {};
-    parts.forEach(part => p[part.type] = part.value);
-    
-    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+    db.function('NOW_LOCAL', () => {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const local = new Date(d.getTime() + (7 * 60 * 60 * 1000));
+    return `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}`;
   });
 } catch (err) {
   console.error('[DB] Gagal membuka database:', err.message);
