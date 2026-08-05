@@ -58,13 +58,17 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Skip rate limiting for static assets, css, js, images, font, and acs/webhooks
-    return req.path.startsWith('/css') || 
+    // Skip rate limiting for admin, static assets, cwmp/tr069, acs, and localhost
+    return req.path.startsWith('/admin') ||
+           req.path.startsWith('/css') || 
            req.path.startsWith('/js') || 
            req.path.startsWith('/img') || 
            req.path.startsWith('/uploads') || 
            req.path.startsWith('/acs') || 
-           req.path.startsWith('/api/webhook');
+           req.path.startsWith('/cwmp') || 
+           req.path.startsWith('/api') || 
+           req.ip === '127.0.0.1' || 
+           req.ip === '::1';
   },
   message: { error: 'Terlalu banyak permintaan. Coba lagi dalam 15 menit.' }
 });
