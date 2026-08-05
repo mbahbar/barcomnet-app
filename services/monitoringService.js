@@ -12,8 +12,26 @@ const metricsHistory = new Map();
 const MAX_HISTORY_SIZE = 100;
 
 let previousCpuTime = null;
+let lastProcessCpu = process.cpuUsage();
+let lastProcessTime = Date.now();
 
 function calculateCpuUsagePercentage() {
+  const currentCpu = process.cpuUsage(lastProcessCpu);
+  const currentTime = Date.now();
+  const timeDiff = (currentTime - lastProcessTime) * 1000; // microseconds
+  
+  if (timeDiff > 0) {
+    const totalUsageMicroSec = currentCpu.user + currentCpu.system;
+    const processPercent = (totalUsageMicroSec / timeDiff) * 100;
+    
+    lastProcessTime = currentTime;
+    lastProcessCpu = process.cpuUsage();
+    
+    if (processPercent >= 0) {
+      return Math.min(100, Math.max(0, processPercent));
+    }
+  }
+
   const cpus = os.cpus();
   if (!cpus || cpus.length === 0) return 0;
 
@@ -293,8 +311,8 @@ function getHealthStatus() {
   // Check load average (Adjusted threshold for single-core / LXC containers)
   const load1 = parseFloat(metrics.system.loadAverage['1min']);
   const cores = metrics.system.cpu.cores;
-  const criticalLoad = Math.max(5.0, cores * 4);
-  const warningLoad = Math.max(3.0, cores * 2.5);
+  const criticalLoad = Math.max(15.0, cores * 8);
+  const warningLoad = Math.max(10.0, cores * 5);
   if (load1 > criticalLoad) {
     issues.push(`Load average is high: ${load1} (cores: ${cores})`);
   } else if (load1 > warningLoad) {
